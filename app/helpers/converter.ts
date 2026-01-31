@@ -1,5 +1,9 @@
 export function percentFromLast(current: number, last: number): number {
-  if (!last || last === 0) return 0
+  if (last === 0) {
+    if (current === 0) return 0
+    return 100
+  }
+
   return Number((((current - last) / last) * 100).toFixed(2))
 }
 

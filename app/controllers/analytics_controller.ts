@@ -1,37 +1,71 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db'
 import { percentFromLast, profitMargin } from '../helpers/converter.js'
+import { DatabaseQueryBuilderContract } from '@adonisjs/lucid/types/querybuilder'
 
 export default class AnalyticsController {
-  async getKPI({ response }: HttpContext) {
+  async getKPI({ request, response }: HttpContext) {
     try {
+      const mode = request.input('mode', 'monthly')
+      const yearInput = request.input('year')
+      const monthInput = request.input('month')
+
       const now = new Date()
 
-      const currentYear = now.getFullYear()
-      const currentMonth = now.getMonth() + 1
+      const currentYear = yearInput ? Number(yearInput) : 2025
+      const currentMonth = monthInput ? Number(monthInput) : now.getMonth() + 1
 
-      const lastMonth = currentMonth === 1 ? 12 : currentMonth - 1
-      const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear
+      let lastMonth = currentMonth === 1 ? 12 : currentMonth - 1
+      let lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear
+      let lastYear = currentYear - 1
 
-      const current = await db
+      let currentQuery = db
         .from('fact_sales')
         .join('dim_dates', 'fact_sales.date_key', 'dim_dates.date_key')
-        .where('dim_dates.year_number', currentYear)
-        .where('dim_dates.month_number', currentMonth)
+
+      let lastQuery: DatabaseQueryBuilderContract<any> | null = db
+        .from('fact_sales')
+        .join('dim_dates', 'fact_sales.date_key', 'dim_dates.date_key')
+
+      // ================= MONTHLY =================
+      if (mode === 'monthly') {
+        currentQuery = currentQuery
+          .where('dim_dates.year_number', currentYear)
+          .where('dim_dates.month_number', currentMonth)
+
+        if (lastMonthYear >= 2025) {
+          lastQuery = lastQuery
+            .where('dim_dates.year_number', lastMonthYear)
+            .where('dim_dates.month_number', lastMonth)
+        } else {
+          lastQuery = null
+        }
+      }
+
+      // ================= YEARLY =================
+      if (mode === 'yearly') {
+        currentQuery = currentQuery.where('dim_dates.year_number', currentYear)
+
+        if (lastYear >= 2025) {
+          lastQuery = lastQuery!.where('dim_dates.year_number', lastYear)
+        } else {
+          lastQuery = null
+        }
+      }
+
+      const current = await currentQuery
         .sum('fact_sales.sales as sales')
         .sum('fact_sales.profit as profit')
         .sum('fact_sales.quantity as quantity')
         .first()
 
-      const last = await db
-        .from('fact_sales')
-        .join('dim_dates', 'fact_sales.date_key', 'dim_dates.date_key')
-        .where('dim_dates.year_number', lastMonthYear)
-        .where('dim_dates.month_number', lastMonth)
-        .sum('fact_sales.sales as sales')
-        .sum('fact_sales.profit as profit')
-        .sum('fact_sales.quantity as quantity')
-        .first()
+      const last = lastQuery
+        ? await lastQuery
+            .sum('fact_sales.sales as sales')
+            .sum('fact_sales.profit as profit')
+            .sum('fact_sales.quantity as quantity')
+            .first()
+        : null
 
       const currentSales = Number(current?.sales ?? 0)
       const lastSales = Number(last?.sales ?? 0)
